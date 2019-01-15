@@ -1,6 +1,6 @@
 CC=gcc
-CFLAGS=-O2 -fPIC -ggdb -Wall -I/usr/local/include
-LDFLAGS=-lpthread -shared -Wl,--no-as-needed -ldl -L/usr/local/lib/ -lpapi
+CFLAGS=-O2 -fPIC -Wall -I/usr/local/include
+LDFLAGS=-shared -Wl,--no-as-needed -ldl -L/usr/local/lib/ -lpapi
 
 libnamedyn=libmypapi.so
 
