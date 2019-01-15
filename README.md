@@ -1,6 +1,6 @@
 # libmypapi
 
-libmypapi is a library to perform automatic hardware counter measure.
+libmypapi is a library to perform automatic hardware counter measure on both CPUs and GPUs.
 
 ## Requisites
 
