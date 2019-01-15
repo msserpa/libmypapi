@@ -93,8 +93,27 @@ static void destructor(){
 		retval = PAPI_destroy_eventset(&EventSet1);
 		if(retval != PAPI_OK)
 			test_fail(__FILE__, __LINE__, "PAPI_destroy_eventset", retval);
+	
+		/* It checks if event name is cuda-based and split it */
+		int i, j;
 
-		fprintf(stderr, "%s=%lld\n", event, value[0]);
+		for(i = 0; i < strlen(event); i++)
+			if(strncmp(&event[i], "event:", 6) == 0){
+				i += 6;
+				break;
+			}
+
+		for(j = i; j < strlen(event); j++)
+			if(strncmp(&event[j], "device", 6) == 0){
+				event[j - 1] = '\0';
+				break;
+			}
+
+		/* If it is not cuda-based then do not split */
+		if(i == j)
+			i = 0;
+
+		printf("%s,%lld\n", &event[i], value[0]);
 
 	}
 }
