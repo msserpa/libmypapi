@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <papi.h>
 
-char *event, eventName[2048], exe[2048];
+char *event, exe[2048];
 int retval, length, EventSet1 = PAPI_NULL;
 long long value[2];
 long long overflows = 0;
