@@ -5,7 +5,7 @@
 #include <unistd.h>
 #include <papi.h>
 
-char *event, exe[2048];
+char *event, eventName[2048], exe[2048];
 int retval, length, EventSet1 = PAPI_NULL;
 long long value[2];
 long long overflows = 0;
@@ -13,9 +13,9 @@ long long overflows = 0;
 /* Use a positive value of retval to simply print an error message */
 void error_handler(int line, const char *call, int retval){
 	if(retval >= 0 || retval == PAPI_ESYS)
-		fprintf(stderr, "Error: %s on line %d\n", call, line);
+		fprintf(stderr, "libmypapi - Error: %s on line %d\n", call, line);
 	else
-		fprintf(stderr, "Error: %s : %s on line %d\n\n", call, PAPI_strerror(retval), line);
+		fprintf(stderr, "libmypapi - Error: %s : %s on line %d\n\n", call, PAPI_strerror(retval), line);
 
 	_exit(1);
 }
@@ -59,10 +59,59 @@ static void constructor(){
 		}
 
 		int eventCode;
-		PAPI_event_name_to_code(event, &eventCode);
-  		retval = PAPI_overflow(EventSet1, eventCode, INT_MAX, 0, overflow_handler);
-  		if(retval != PAPI_OK)
-  			error_handler(__LINE__, "PAPI_EVENT is not defined", retval);
+
+		retval = PAPI_event_name_to_code(event, &eventCode);
+		if(retval != PAPI_OK){
+  			switch(retval){
+  				case PAPI_EINVAL: 
+  					error_handler(__LINE__, "One or more of the arguments is invalid", retval);
+  				break;
+  				case PAPI_ENOTPRESET:
+  					error_handler(__LINE__, "The hardware event specified is not a valid PAPI preset", retval);
+  				break;
+  				case PAPI_ENOEVNT:
+  					error_handler(__LINE__, "The PAPI preset is not available on the underlying hardware", retval);
+  				break;
+  				case PAPI_ENOINIT:
+  					error_handler(__LINE__, "The PAPI library has not been initialized", retval);
+  				break;
+  				default:
+  					error_handler(__LINE__, "PAPI_event_name_to_code error", retval);
+  			}
+  		}
+
+  		if(eventCode < 0)
+  			printf("libmypapi - Warning: eventCode is not defined!\n");
+  		else{
+	  		retval = PAPI_overflow(EventSet1, eventCode, INT_MAX, 0, overflow_handler);
+	  		if(retval != PAPI_OK){
+	  			switch(retval){
+	  				case PAPI_EINVAL: 
+	  					error_handler(__LINE__, "One or more of the arguments is invalid. Specifically, a bad threshold value", retval);
+	  				break;
+	  				case PAPI_ENOMEM:
+	  					error_handler(__LINE__, "Insufficient memory to complete the operation", retval);
+	  				break;
+	  				case PAPI_ENOEVST:
+	  					error_handler(__LINE__, "The EventSet specified does not exist", retval);
+	  				break;
+	  				case PAPI_EISRUN:
+	  					error_handler(__LINE__, "The EventSet is currently counting events", retval);
+	  				break;
+	  				case PAPI_ECNFLCT:
+	  					error_handler(__LINE__, "The underlying counter hardware cannot count this event and other events in the EventSet simultaneously. Or you are trying to overflow both by hardware and by forced software at the same time", retval);
+	  				break;
+	  				case PAPI_ENOEVNT:
+	  					error_handler(__LINE__, "The PAPI preset is not available on the underlying hardware", retval);
+	  				break;
+	  				case PAPI_ENOINIT:
+	  					error_handler(__LINE__, "The PAPI library has not been initialized", retval);
+	  				break;  				
+	  				default:
+	  					error_handler(__LINE__, "PAPI_EVENT overflowed", retval);
+	  			}
+	  		}
+  		}
 
 		/* Start PAPI */
 		retval = PAPI_start(EventSet1);
