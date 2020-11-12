@@ -1,4 +1,4 @@
-CC=gcc
+CC=icc
 CFLAGS=-O2 -fPIC -Wall
 LDFLAGS=-shared -Wl,--no-as-needed -ldl -lpthread
 
