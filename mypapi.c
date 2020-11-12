@@ -140,10 +140,6 @@ static void constructor(){
 		if(f == NULL)
 			error_handler(__LINE__, "Trouble creating the output file", retval);
 
-		/* Register the timestamp and the file header */
-		fprintf(f, "%lu\n", (unsigned long) time(NULL));
-		fprintf(f, "event,value\n");
-
 		/* Start PAPI */
 		retval = PAPI_start(EventSet1);
 		if(retval != PAPI_OK)
@@ -157,6 +153,10 @@ static void constructor(){
 		else if(pid){
 			pid_t child;
 			int status;
+
+			/* Register the timestamp and the file header */
+			fprintf(f, "%lu\n", (unsigned long) time(NULL));
+			fprintf(f, "event,value\n");
 
 			/* Read hardware counters until child execution' ends */
 			while(1){
