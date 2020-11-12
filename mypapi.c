@@ -25,12 +25,14 @@ void error_handler(int line, const char *call, int retval){
 static void __attribute__ ((constructor)) constructor();
 
 static void constructor(){
-	char short_exec[BUFFER_SIZE], exec[BUFFER_SIZE], file[BUFFER_SIZE], log_dir[BUFFER_SIZE];
+	char short_exec[BUFFER_SIZE], exec[BUFFER_SIZE], data[BUFFER_SIZE];
+	char file[BUFFER_SIZE], log_dir[BUFFER_SIZE];
 	char **list_events = NULL;
-	int i, retval, length, sample_delay_ms, EventSet1 = PAPI_NULL, num_events = 0;
+	int i, retval, length;
+	int sample_delay_ms, EventSet1 = PAPI_NULL, num_events = 0;
 	long long int *values;
 	pid_t pid = 0;
-	FILE *f;
+	FILE *fr, *fw;
 
 	/* Get full path */
 	length = readlink("/proc/self/exe", exec, sizeof(exec) - 1);
@@ -134,10 +136,17 @@ static void constructor(){
 		if(stat(log_dir, &st) == -1)
 	    	mkdir(log_dir, 0700);
 
+	    /* Freq file */
+	    /* TODO - cpu != 0 */
+		sprintf(file, "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq");
+		fr = fopen(file, "r");	    
+		if(fr == NULL)
+			error_handler(__LINE__, "Trouble reading the scaling_cur_freq file", retval);
+
 	    /* Output file */
 	    sprintf(file, "%s/%s.freq", log_dir, short_exec);
-		f = fopen(file, "w");
-		if(f == NULL)
+		fw = fopen(file, "w");
+		if(fw == NULL)
 			error_handler(__LINE__, "Trouble creating the output file", retval);
 
 		/* Start PAPI */
@@ -155,19 +164,27 @@ static void constructor(){
 			int status;
 
 			/* Register the timestamp and the file header */
-			fprintf(f, "%lu\n", (unsigned long) time(NULL));
-			fprintf(f, "event,value\n");
+			fprintf(fw, "%lu\n", (unsigned long) time(NULL));
+			fprintf(fw, "event,value\n");
 
 			/* Read hardware counters until child execution' ends */
 			while(1){
+				/* Reading the CPU Frequency*/
+				length = fread(data, 1, BUFFER_SIZE - 1, fr);
+				data[length] = '\0';
+				fseek(fr, 0, SEEK_SET);
+
 				/* Reading the counters */
 				retval = PAPI_read(EventSet1, values);
 				if(retval != PAPI_OK)
 					error_handler(__LINE__, "PAPI_read", retval);
 
-				/* Writting the hardware counters */
+				/* Writting the CPU Frequency */
+				fprintf(fw, "CPU-FREQ,%s", data);
+
+				/* Writting the counters */
 				for(i = 0; i < num_events; i++)
-					fprintf(f, "%s,%lld\n", list_events[i], values[i]);
+					fprintf(fw, "%s,%lld\n", list_events[i], values[i]);
 
 				/* Reducing overhead with a delay between samples */
 				usleep((useconds_t) sample_delay_ms * 1000);
@@ -178,8 +195,9 @@ static void constructor(){
 					break;
 			}
 
-			/* Write the output file */
-			fclose(f);
+			/* Close input/output files */
+			fclose(fr);
+			fclose(fw);
 
 			/* Check child status */
 			if(WEXITSTATUS(status) != 0)
