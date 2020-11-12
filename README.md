@@ -28,3 +28,9 @@ PAPI_EVENT is an environment variable. You can check all PAPI events avaiable by
 or
 
      $ papi_native_avail
+
+
+You may need to authorize the use of hardware counters by call:
+
+     $ sudo sh -c 'echo -1 > /proc/sys/kernel/perf_event_paranoid'
+

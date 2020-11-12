@@ -3,12 +3,12 @@
 #include <string.h>
 #include <limits.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <papi.h>
 
-char *event, exe[2048];
-int retval, length, EventSet1 = PAPI_NULL;
-long long value[2];
-long long overflows = 0;
+#define PAPI_MAX_EVENTS 10
+#define BUFFER_SIZE 1024
 
 /* Use a positive value of retval to simply print an error message */
 void error_handler(int line, const char *call, int retval){
@@ -20,21 +20,26 @@ void error_handler(int line, const char *call, int retval){
 	_exit(1);
 }
 
-void overflow_handler(int EventSet, void *address, long_long overflow_vector, void *context){
-	overflows++;
-	if(overflows >= LLONG_MAX / (long long) INT_MAX)
-		error_handler(__LINE__, "overflow", 1);	
-}
-
 static void __attribute__ ((constructor)) constructor();
 
 static void constructor(){
+	char exe[BUFFER_SIZE], **list_events = NULL;
+	int i, retval, length, sample_delay_ms, EventSet1 = PAPI_NULL, num_events = 0;
+	long long int *values;
+	pid_t pid = 0;
+
 	length = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
 	if(length == -1)
         error_handler(__LINE__, "readlink", 1);
 
     /* Only programs whose name ends with ".x" are accepted */
 	if(exe[length - 2] == '.' && exe[length - 1] == 'x'){
+		/* Get sample delay from environment variable */
+		if(getenv("PAPI_DELAY") == NULL)
+			sample_delay_ms = 250;
+		else
+			sample_delay_ms = atoi(getenv("PAPI_DELAY"));
+
 
 		/* Init the PAPI library */
 		retval = PAPI_library_init(PAPI_VER_CURRENT);
@@ -47,120 +52,124 @@ static void constructor(){
 		if(retval != PAPI_OK)
 			error_handler(__LINE__, "PAPI_create_eventset", retval);
 
-		/* Get environment variable */
-		event = getenv("PAPI_EVENT");
-		if(event == NULL)
-			error_handler(__LINE__, "PAPI_EVENT is not defined", 1);
-
-		/* Add event from ENV */
-		retval = PAPI_add_named_event(EventSet1, event);
+		/* Force addition of component */
+		retval = PAPI_assign_eventset_component(EventSet1, 0);
 		if(retval != PAPI_OK){
-			error_handler(__LINE__, "Trouble adding event", retval);
+			error_handler(__LINE__, "PAPI_assign_eventset_component", retval);
 		}
 
-		int eventCode;
+		/* Add inherit support */
+		PAPI_option_t opt;
+		memset(&opt, 0x0, sizeof(PAPI_option_t));
 
-		retval = PAPI_event_name_to_code(event, &eventCode);
-		if(retval != PAPI_OK){
-  			switch(retval){
-  				case PAPI_EINVAL: 
-  					error_handler(__LINE__, "One or more of the arguments is invalid", retval);
-  				break;
-  				case PAPI_ENOTPRESET:
-  					error_handler(__LINE__, "The hardware event specified is not a valid PAPI preset", retval);
-  				break;
-  				case PAPI_ENOEVNT:
-  					error_handler(__LINE__, "The PAPI preset is not available on the underlying hardware", retval);
-  				break;
-  				case PAPI_ENOINIT:
-  					error_handler(__LINE__, "The PAPI library has not been initialized", retval);
-  				break;
-  				default:
-  					error_handler(__LINE__, "PAPI_event_name_to_code error", retval);
-  			}
-  		}
+		opt.inherit.inherit = PAPI_INHERIT_ALL;
+		opt.inherit.eventset = EventSet1;
+		if ( ( retval = PAPI_set_opt( PAPI_INHERIT, &opt ) ) != PAPI_OK ) {
+			if ( retval == PAPI_ECMP) {
+				error_handler( __LINE__, "Inherit not supported by current component.\n", retval );
+			} else if (retval == PAPI_EPERM) {
+				error_handler( __LINE__, "Inherit not supported by current component.\n", retval );
+			} else {
+				error_handler(__LINE__, "PAPI_set_opt", retval );
+			}
+		}
 
-  		if(eventCode < 0)
-  			printf("libmypapi - Warning: eventCode is not defined!\n");
-  		else{
-	  		retval = PAPI_overflow(EventSet1, eventCode, INT_MAX, 0, overflow_handler);
-	  		if(retval != PAPI_OK){
-	  			switch(retval){
-	  				case PAPI_EINVAL: 
-	  					error_handler(__LINE__, "One or more of the arguments is invalid. Specifically, a bad threshold value", retval);
-	  				break;
-	  				case PAPI_ENOMEM:
-	  					error_handler(__LINE__, "Insufficient memory to complete the operation", retval);
-	  				break;
-	  				case PAPI_ENOEVST:
-	  					error_handler(__LINE__, "The EventSet specified does not exist", retval);
-	  				break;
-	  				case PAPI_EISRUN:
-	  					error_handler(__LINE__, "The EventSet is currently counting events", retval);
-	  				break;
-	  				case PAPI_ECNFLCT:
-	  					error_handler(__LINE__, "The underlying counter hardware cannot count this event and other events in the EventSet simultaneously. Or you are trying to overflow both by hardware and by forced software at the same time", retval);
-	  				break;
-	  				case PAPI_ENOEVNT:
-	  					error_handler(__LINE__, "The PAPI preset is not available on the underlying hardware", retval);
-	  				break;
-	  				case PAPI_ENOINIT:
-	  					error_handler(__LINE__, "The PAPI library has not been initialized", retval);
-	  				break;  				
-	  				default:
-	  					error_handler(__LINE__, "PAPI_EVENT overflowed", retval);
-	  			}
-	  		}
-  		}
+		/* Get events from environment variable */
+		if(getenv("PAPI_EVENT") == NULL)
+			error_handler(__LINE__, "PAPI_EVENT is not defined!", 1);
+		else{
+			list_events = (char **) calloc(PAPI_MAX_EVENTS, sizeof(char *));
+			char *str;
+			str = strtok(getenv("PAPI_EVENT"),",");
+			while(str != NULL){
+				list_events[num_events] = (char *) calloc(strlen(str) + 1, sizeof(char));
+				strcpy(list_events[num_events++], str);
+				str = strtok(NULL, ",");
+				if(num_events > PAPI_MAX_EVENTS)
+					error_handler(__LINE__, "Maximum number of PAPI events reached", 1);
+			}
+			list_events = (char **) realloc(list_events, num_events * sizeof(char *));
+		}
+		values = (long long int *) calloc(num_events, sizeof(long long));
+
+		/* Add events */
+		for(i = 0; i < num_events; i++){
+			retval = PAPI_add_named_event(EventSet1, list_events[i]);
+			if(retval != PAPI_OK)
+				error_handler(__LINE__, "Trouble adding event", retval);
+		}
+
+		/* Remove underlines from events' name */
+		for(i = 0; i < num_events; i++){
+			char *ptr = list_events[i];
+			while(*ptr != '\0'){
+				if(*ptr == '_')
+					*ptr='-';
+				ptr++;
+			}
+		}
 
 		/* Start PAPI */
 		retval = PAPI_start(EventSet1);
 		if(retval != PAPI_OK)
 			error_handler(__LINE__, "PAPI_start", retval);
 
-	}
-}
+		/* The child runs the application while the parent measure the hardware counters */
+		pid = fork();
+		if(pid < 0)
+			error_handler(__LINE__, "fork", 1);
+		/* Parent */
+		else if(pid){
+			pid_t child;
+			int status;
 
-static void __attribute__ ((destructor)) destructor();
+			/* Read hardware counters until child execution' ends */
+			while(1){
+				/* Reading the counters */
+				retval = PAPI_read(EventSet1, values);
+				if(retval != PAPI_OK)
+					error_handler(__LINE__, "PAPI_read", retval);
 
-static void destructor(){
-    /* Only programs whose name ends with ".x" are accepted */
-	if(exe[length - 2] == '.' && exe[length - 1] == 'x'){
+				/* Printing the hardware counters */
+				for(i = 0; i < num_events; i++)
+					printf("%s,%lld\n", list_events[i], values[i]);
 
-		/* Stop PAPI */
-		retval = PAPI_stop(EventSet1, value);
-		if(retval != PAPI_OK)
-			error_handler(__LINE__, "PAPI_stop", retval);
+				/* Reducing overhead with a delay between samples */
+				usleep((useconds_t) sample_delay_ms * 1000);
 
-		/* Shutdown the EventSet */
-		retval = PAPI_remove_named_event(EventSet1, event);
-		if(retval != PAPI_OK)
-			error_handler(__LINE__, "PAPI_remove_named_event", retval);
-
-		retval = PAPI_destroy_eventset(&EventSet1);
-		if(retval != PAPI_OK)
-			error_handler(__LINE__, "PAPI_destroy_eventset", retval);
-	
-		/* It checks if event name is cuda-based and split it */
-		unsigned int i, j;
-
-		for(i = 0; i < strlen(event); i++)
-			if(strncmp(&event[i], "event:", 6) == 0){
-				i += 6;
-				break;
+				/* Is the child running? */
+				child = waitpid(pid, &status, WNOHANG);
+				if(child == pid)
+					break;
 			}
 
-		for(j = i; j < strlen(event); j++)
-			if(strncmp(&event[j], "device", 6) == 0){
-				event[j - 1] = '\0';
-				break;
-			}
+			/* Check child status */
+			if(WEXITSTATUS(status) != 0)
+				error_handler(__LINE__, "Exit status of child to attach to", PAPI_EMISC);
 
-		/* If it is not cuda-based then do not split */
-		if(i == j)
-			i = 0;
+			/* Stop PAPI */
+			retval = PAPI_stop(EventSet1, values);
+			if(retval != PAPI_OK)
+				error_handler(__LINE__, "PAPI_stop", retval);
 
-		printf("%s,%lld\n", &event[i], value[0]);
+			/* Remove the Events */
+			retval = PAPI_cleanup_eventset(EventSet1);
+			if(retval != PAPI_OK)
+				error_handler(__LINE__, "PAPI_cleanup_eventset", retval);			
 
+			/* Shutdown the EventSet */
+			retval = PAPI_destroy_eventset(&EventSet1);
+			if(retval != PAPI_OK)
+				error_handler(__LINE__, "PAPI_destroy_eventset", retval);
+
+			/* Freeing allocated memory */
+			for(i = 0; i < num_events; i++)
+				free(list_events[i]);
+			free(list_events);
+			free(values);
+
+
+			exit(EXIT_SUCCESS);
+		}
 	}
 }
