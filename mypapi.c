@@ -26,9 +26,9 @@ static void __attribute__ ((constructor)) constructor();
 
 static void constructor(){
 	char short_exec[BUFFER_SIZE], exec[BUFFER_SIZE], data[BUFFER_SIZE];
-	char file[BUFFER_SIZE], log_dir[BUFFER_SIZE];
+	char file[4 * BUFFER_SIZE], log_dir[2 * BUFFER_SIZE];
 	char **list_events = NULL;
-	int i, retval, length;
+	int i, retval, length, cpu;
 	int sample_delay_ms, EventSet1 = PAPI_NULL, num_events = 0;
 	long long int *values;
 	pid_t pid = 0;
@@ -46,9 +46,15 @@ static void constructor(){
 	if(exec[length - 2] == '.' && exec[length - 1] == 'x'){
 		/* Get sample delay from environment variable */
 		if(getenv("PAPI_DELAY") == NULL)
-			sample_delay_ms = 250;
+			sample_delay_ms = 100;
 		else
 			sample_delay_ms = atoi(getenv("PAPI_DELAY"));
+
+		/* Get process cpu */
+		if(getenv("PAPI_CORE") == NULL)
+			cpu = 0;
+		else
+			cpu = atoi(getenv("PAPI_CORE"));
 
 		/* Init the PAPI library */
 		retval = PAPI_library_init(PAPI_VER_CURRENT);
@@ -103,6 +109,7 @@ static void constructor(){
 
 		/* Add events */
 		for(i = 0; i < num_events; i++){
+			printf("-%s-\n", list_events[i]);
 			retval = PAPI_add_named_event(EventSet1, list_events[i]);
 			if(retval != PAPI_OK)
 				error_handler(__LINE__, "Trouble adding event", retval);
@@ -124,27 +131,26 @@ static void constructor(){
 
 		struct stat st = {0};
 
-		sprintf(log_dir, "./log");
+		sprintf(log_dir, "./log/");
 		if(stat(log_dir, &st) == -1)
 	    	mkdir(log_dir, 0700);
 
-		sprintf(log_dir, "./log/%04d-%02d-%02d", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+		sprintf(&log_dir[strlen(log_dir)], "%04d-%02d-%02d/", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
 		if(stat(log_dir, &st) == -1)
 	    	mkdir(log_dir, 0700);
 
-		sprintf(log_dir, "%s/%02d-%02d-%02d/",log_dir, tm.tm_hour, tm.tm_min, tm.tm_sec);
+		sprintf(&log_dir[strlen(log_dir)], "%02d-%02d-%02d/",tm.tm_hour, tm.tm_min, tm.tm_sec);
 		if(stat(log_dir, &st) == -1)
 	    	mkdir(log_dir, 0700);
 
 	    /* Freq file */
-	    /* TODO - cpu != 0 */
-		sprintf(file, "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq");
+		sprintf(file, "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq", cpu);
 		fr = fopen(file, "r");	    
 		if(fr == NULL)
 			error_handler(__LINE__, "Trouble reading the scaling_cur_freq file", retval);
 
 	    /* Output file */
-	    sprintf(file, "%s/%s.freq", log_dir, short_exec);
+	    sprintf(file, "%s%s.freq", log_dir, short_exec);
 		fw = fopen(file, "w");
 		if(fw == NULL)
 			error_handler(__LINE__, "Trouble creating the output file", retval);
@@ -229,3 +235,4 @@ static void constructor(){
 		}
 	}
 }
+
