@@ -38,7 +38,7 @@ static void constructor(){
 	int sample_delay_ms, EventSet1 = PAPI_NULL, num_events = 0;
 	long long int *values;
 	pid_t pid = 0;
-	FILE *fr, *fw;
+	FILE *fr, *fw, *fo;
 
 	/* Get full path */
 	length = readlink("/proc/self/exe", exec, sizeof(exec) - 1);
@@ -115,7 +115,6 @@ static void constructor(){
 
 		/* Add events */
 		for(i = 0; i < num_events; i++){
-			printf("-%s-\n", list_events[i]);
 			retval = PAPI_add_named_event(EventSet1, list_events[i]);
 			if(retval != PAPI_OK)
 				error_handler(__LINE__, "Trouble adding event", retval);
@@ -173,11 +172,28 @@ static void constructor(){
 		if(fr == NULL)
 			error_handler(__LINE__, "Trouble reading the scaling_cur_freq file", retval);
 
-	    /* Output file */
-	    sprintf(file, "%s%s.freq", log_dir, short_exec);
-		fw = fopen(file, "w");
+	    /* Temporary file */
+	    sprintf(file, "/tmp/%s.out", short_exec);
+		fw = fopen(file, "w+");
 		if(fw == NULL)
-			error_handler(__LINE__, "Trouble creating the output file", retval);
+			error_handler(__LINE__, "Trouble creating the temporary file", retval);
+
+		/* Output file*/
+		if(getenv("LIB_FILE"))
+			sprintf(file, "%s%s.out", log_dir, getenv("LIB_FILE"));
+		else
+			sprintf(file, "%s%s.out", log_dir, short_exec);
+		
+		printf("\033[0;31m");
+		printf("libmypapi\n");
+		printf(" events: ");
+		for(i = 0; i < num_events; i++)
+			printf("%s ", list_events[i]);
+		printf("\n");
+		printf(" sampling: %dms\n", sample_delay_ms);
+		printf(" core: %d\n", cpu);
+		printf(" log: %s\n\n", file);
+		printf("\033[0m");		
 
 		/* Start PAPI */
 		retval = PAPI_start(EventSet1);
@@ -225,9 +241,23 @@ static void constructor(){
 					break;
 			}
 
-			/* Close input/output files */
+			/* Output file*/
+			fo = fopen(file, "w");
+			if(fo == NULL)
+				error_handler(__LINE__, "Trouble creating the output file", retval);
+
+			/* Copy tmp file to output file */
+			fseek(fw, 0L, SEEK_SET);
+			char c = fgetc(fw);
+		    while(c != EOF){
+		    	fputc(c, fo);
+		        c = fgetc(fw);
+		    }
+
+			/* Close input/tmp/output files */
 			fclose(fr);
 			fclose(fw);
+			fclose(fo);
 
 			/* Check child status */
 			if(WEXITSTATUS(status) != 0)
