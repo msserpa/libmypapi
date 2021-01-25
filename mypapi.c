@@ -25,9 +25,15 @@ void error_handler(int line, const char *call, int retval){
 static void __attribute__ ((constructor)) constructor();
 
 static void constructor(){
+	if(getuid() != 0){
+		fprintf(stderr, "Please run this program as root user!\n");
+		exit(EXIT_FAILURE);
+	}
+
+
 	char short_exec[BUFFER_SIZE], exec[BUFFER_SIZE], data[BUFFER_SIZE];
-	char file[4 * BUFFER_SIZE], log_dir[2 * BUFFER_SIZE];
-	char **list_events = NULL;
+	char buffer[BUFFER_SIZE], file[4 * BUFFER_SIZE], log_dir[2 * BUFFER_SIZE];
+	char **list_events = NULL, *str;
 	int i, retval, length, cpu;
 	int sample_delay_ms, EventSet1 = PAPI_NULL, num_events = 0;
 	long long int *values;
@@ -45,16 +51,16 @@ static void constructor(){
     /* Only programs whose name ends with ".x" are accepted */
 	if(exec[length - 2] == '.' && exec[length - 1] == 'x'){
 		/* Get sample delay from environment variable */
-		if(getenv("PAPI_DELAY") == NULL)
+		if(getenv("LIB_DELAY") == NULL)
 			sample_delay_ms = 100;
 		else
-			sample_delay_ms = atoi(getenv("PAPI_DELAY"));
+			sample_delay_ms = atoi(getenv("LIB_DELAY"));
 
 		/* Get process cpu */
-		if(getenv("PAPI_CORE") == NULL)
+		if(getenv("LIB_CORE") == NULL)
 			cpu = 0;
 		else
-			cpu = atoi(getenv("PAPI_CORE"));
+			cpu = atoi(getenv("LIB_CORE"));
 
 		/* Init the PAPI library */
 		retval = PAPI_library_init(PAPI_VER_CURRENT);
@@ -90,12 +96,12 @@ static void constructor(){
 		}
 
 		/* Get events from environment variable */
-		if(getenv("PAPI_EVENT") == NULL)
-			error_handler(__LINE__, "PAPI_EVENT is not defined!", 1);
+		if(getenv("LIB_EVENT") == NULL)
+			error_handler(__LINE__, "LIB_EVENT is not defined!", 1);
 		else{
 			list_events = (char **) calloc(PAPI_MAX_EVENTS, sizeof(char *));
 			char *str;
-			str = strtok(getenv("PAPI_EVENT"),",");
+			str = strtok(getenv("LIB_EVENT"),",");
 			while(str != NULL){
 				list_events[num_events] = (char *) calloc(strlen(str) + 1, sizeof(char));
 				strcpy(list_events[num_events++], str);
@@ -132,16 +138,34 @@ static void constructor(){
 		struct stat st = {0};
 
 		sprintf(log_dir, "./log/");
+		
 		if(stat(log_dir, &st) == -1)
 	    	mkdir(log_dir, 0700);
 
-		sprintf(&log_dir[strlen(log_dir)], "%04d-%02d-%02d/", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
-		if(stat(log_dir, &st) == -1)
-	    	mkdir(log_dir, 0700);
+	    if(getenv("LIB_DIR")){
+	    	str = strtok(getenv("LIB_DIR"),"/");
+	    	while(str != NULL){
+	    		strcat(log_dir, str);
+	    		strcat(log_dir, "/");
 
-		sprintf(&log_dir[strlen(log_dir)], "%02d-%02d-%02d/",tm.tm_hour, tm.tm_min, tm.tm_sec);
-		if(stat(log_dir, &st) == -1)
-	    	mkdir(log_dir, 0700);
+				if(stat(log_dir, &st) == -1)
+			    	mkdir(log_dir, 0700);
+
+	    		str = strtok(NULL, "/");
+	    	}
+	    }else{
+			sprintf(buffer, "%04d-%02d-%02d/", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+			strcat(log_dir, buffer);
+			
+			if(stat(log_dir, &st) == -1)
+		    	mkdir(log_dir, 0700);
+
+			sprintf(buffer, "%02d-%02d-%02d/", tm.tm_hour, tm.tm_min, tm.tm_sec);
+			strcat(log_dir, buffer);
+			
+			if(stat(log_dir, &st) == -1)
+		    	mkdir(log_dir, 0700);
+		}
 
 	    /* Freq file */
 		sprintf(file, "/sys/devices/system/cpu/cpu%d/cpufreq/scaling_cur_freq", cpu);
